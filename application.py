@@ -1,5 +1,5 @@
 import os
-from flask import Flask, request, abort
+from flask import Flask, render_template, request, abort
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
@@ -12,6 +12,11 @@ app = Flask(__name__)
 # Use Environment Variables for safety!
 configuration = Configuration(access_token=os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
 handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
+
+@app.route("/")
+def home():
+    # This looks inside the /templates folder for index.html
+    return render_template("index.html")
 
 @app.route("/callback", methods=['POST'])
 def callback():
