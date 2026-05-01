@@ -27,7 +27,7 @@ def send_drone_command(command_text):
     client.tls_set() 
     client.username_pw_set(MQTT_USER, MQTT_PASS)
     client.connect(MQTT_BROKER, MQTT_PORT)
-    client.publish("kasetvision/commands", command_text)
+    client.publish("kaset/vision/commands", command_text)
     client.disconnect()
 
 @app.route("/")
