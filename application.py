@@ -22,13 +22,24 @@ MQTT_PORT = 8883
 MQTT_USER = os.getenv('MQTT_USER')
 MQTT_PASS = os.getenv('MQTT_PASSWORD')
 
-def send_drone_command(command_text):
-    client = mqtt.Client(transport="websockets") 
-    client.tls_set() 
-    client.username_pw_set(MQTT_USER, MQTT_PASS)
+client = mqtt.Client(transport="websockets")
+client.tls_set()
+client.username_pw_set(MQTT_USER, MQTT_PASS)
+
+try:
     client.connect(MQTT_BROKER, MQTT_PORT)
-    client.publish("kaset/vision/commands", command_text)
-    client.disconnect()
+    client.loop_start()
+except Exception as e:
+    print(f"Initial MQTT connection failed: {e}")
+
+def send_drone_command(command_text):
+    try:
+        result = client.publish("kaset/vision/commands", command_text)
+        if result.rc != 0:
+            print("MQTT Publish failed, attempting reconnect...")
+            client.reconnect()
+    except Exception as e:
+        print(f"Error publishing: {e}")
 
 @app.route("/")
 def home():
