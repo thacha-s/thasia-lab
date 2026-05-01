@@ -1,10 +1,11 @@
 import os
+import paho.mqtt.client as mqtt
 from flask import Flask, render_template, request, abort
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
     Configuration, ApiClient, MessagingApi, ReplyMessageRequest, 
-    PushMessageRequest, TextMessage
+    PushMessageRequest, TextMessage, ImageMessage
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
@@ -12,37 +13,53 @@ app = Flask(__name__)
 
 configuration = Configuration(access_token=os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
 handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
-
-# Your User ID (Found in LINE Developers Console under Messaging API tab)
-# Or you can capture it dynamically when you message the bot
 ADMIN_USER_ID = os.getenv('USER_ID') 
+
+MQTT_BROKER = "d1b0d2ac95f14deab954639fbaeba387.s1.eu.hivemq.cloud"
+MQTT_PORT = 8883
+MQTT_USER = os.getenv('MQTT_USER')
+MQTT_PASS = os.getenv('MQTT_PASSWORD')
+
+def send_drone_command(command_text):
+    client = mqtt.Client(transport="websockets") 
+    client.tls_set() 
+    client.username_pw_set(MQTT_USER, MQTT_PASS)
+    client.connect(MQTT_BROKER, MQTT_PORT)
+    client.publish("kasetvision/commands", command_text)
+    client.disconnect()
 
 @app.route("/")
 def home():
     return render_template("index.html")
 
-# --- ROUTE FOR THE RASPBERRY PI ---
-@app.route("/sensor-data", methods=['POST'])
-def receive_sensor_data():
-    data = request.json  # This gets the {"status": "...", "location": "..."} from your Pi
-    status = data.get("status", "Unknown Alert")
-    location = data.get("location", "Unknown Location")
-    
-    alert_text = f"🚨 KASET VISION ALERT!\nStatus: {status}\nLocation: {location}"
-    
-    # Push message to YOU (not a reply, but an proactive alert)
-    if ADMIN_USER_ID:
-        with ApiClient(configuration) as api_client:
-            line_bot_api = MessagingApi(api_client)
-            line_bot_api.push_message(
-                PushMessageRequest(
-                    to=ADMIN_USER_ID,
-                    messages=[TextMessage(text=alert_text)]
+@app.route("/data", methods=['POST'])
+def receive_data():
+    data = request.json
+    disease = data.get("disease", "ไม่ระบุชนิด")
+    confidence = data.get("confidence", 0)
+    image_url = data.get("image_url")
+    preview_url = data.get("preview_url")
+
+    if confidence > 0.8:
+        if ADMIN_USER_ID and image_url:
+            alert_text = f"ตรวจพบโรค\n\nชนิด: {disease}\nความเชื่อมั่น: {confidence*100}%\n\nตรวจสอบภาพถ่ายด้านล่าง:"
+            
+            with ApiClient(configuration) as api_client:
+                line_bot_api = MessagingApi(api_client)
+                line_bot_api.push_message(
+                    PushMessageRequest(
+                        to=ADMIN_USER_ID,
+                        messages=[
+                            TextMessage(text=alert_text),
+                            ImageMessage(
+                                original_content_url=image_url,
+                                preview_image_url=preview_url or image_url
+                            )
+                        ]
+                    )
                 )
-            )
     return "OK", 200
 
-# --- ROUTE FOR LINE WEBHOOK ---
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers['X-Line-Signature']
@@ -55,15 +72,41 @@ def callback():
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
-    user_text = event.message.text.lower()
-    
-    # Store your User ID if you don't know it yet (check Azure logs)
-    print(f"User ID is: {event.source.user_id}")
+    user_text = event.message.text.strip()
+    reply = ""
 
-    if "status" in user_text:
-        reply = "Kaset Vision Cloud: All systems operational. Waiting for drone telemetry."
-    else:
-        reply = f"Cloud received: {event.message.text}"
+    if user_text == "สั่งบิน":
+        reply = "กรุณาระบุขนาดพื้นที่นาข้าว (ในหน่วยไร่) เพื่อคำนวณเส้นทางบินค่ะ\n\nตัวอย่างการตอบ: \"1 ไร่\""
+    
+    elif "ไร่" in user_text and any(char.isdigit() for char in user_text):
+        area = [int(s) for s in user_text.split() if s.isdigit()][0]
+        user_state[user_id] = area
+        reply = f"ระบุความสูงที่ต้องการให้โดรนบิน (เมตร)\n\nตัวอย่าง: \"5 เมตร\""
+
+    elif "เมตร" in user_text:
+        height = [int(s) for s in user_text.split() if s.isdigit()][0]
+        area = user_state.get(user_id, 1)
+        send_drone_command(f"START_SCAN_RAI_{area}_ALT_{height}")
+        reply = f"รับทราบ! เริ่มสแกนพื้นที่ {area} ไร่ ที่ความสูง {height} เมตร"
+
+    elif user_text == "ตรวจสอบสถานะโดรน":
+        send_drone_command("GET_STATUS")
+        reply = "กำลังดึงข้อมูลจากโดรน... \n\nแบตเตอรี่: กำลังตรวจสอบ\n\nความสูง: -- ม.\n\nความคืบหน้า: --%"
+
+    elif user_text == "หยุดระบบฉุกเฉิน":
+        reply = "ยืนยันการหยุดระบบฉุกเฉินหรือไม่? (พิมพ์ 'Y' เพื่อทำรายการ)"
+
+    elif user_text == "Y":
+        send_drone_command("EMERGENCY_STOP")
+        reply = "สั่งหยุดระบบฉุกเฉินเรียบร้อยแล้ว! โปรดตรวจสอบความปลอดภัยของโดรน"
+
+    elif user_text == "จัดการระบบประมวลผล":
+        reply = "ต้องการให้ Raspberry Pi 'ปิดระบบ' หรือ 'เริ่มระบบใหม่' ครับ?"
+
+    elif "ปิดระบบ" in user_text or "เริ่มระบบใหม่" in user_text:
+        action = "SHUTDOWN" if "ปิดระบบ" in user_text else "REBOOT"
+        send_drone_command(action)
+        reply = f"รับทราบ กำลังดำเนินรายการ {action} ใน 5 วินาที..."
 
     with ApiClient(configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
