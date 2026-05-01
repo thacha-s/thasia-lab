@@ -98,7 +98,7 @@ def handle_message(event):
             height = [int(s) for s in user_text.split() if s.isdigit()][0]
             area = user_state.get(user_id, 1)
             send_drone_command(f"START_SCAN_RAI_{area}_ALT_{height}")
-            reply = f"รับทราบ! เริ่มสแกนพื้นที่ {area} ไร่ ที่ความสูง {height} เมตร"
+            reply = f"รับทราบค่ะ เริ่มสแกนพื้นที่ {area} ไร่ ที่ความสูง {height} เมตร"
     
         elif user_text == "ตรวจสอบสถานะโดรน":
             send_drone_command("GET_STATUS")
@@ -112,12 +112,12 @@ def handle_message(event):
             reply = "สั่งหยุดระบบฉุกเฉินเรียบร้อยแล้ว! โปรดตรวจสอบความปลอดภัยของโดรน"
     
         elif user_text == "จัดการระบบประมวลผล":
-            reply = "ต้องการให้ Raspberry Pi 'ปิดระบบ' หรือ 'เริ่มระบบใหม่' ครับ?"
+            reply = "ต้องการให้ Raspberry Pi 'ปิดระบบ' หรือ 'เริ่มระบบใหม่' คะ"
     
         elif "ปิดระบบ" in user_text or "เริ่มระบบใหม่" in user_text:
             action = "SHUTDOWN" if "ปิดระบบ" in user_text else "REBOOT"
             send_drone_command(action)
-            reply = f"รับทราบ กำลังดำเนินรายการ {action} ใน 5 วินาที..."
+            reply = f"รับทราบค่ะ กำลังดำเนินรายการ {action} ใน 5 วินาที..."
     
     with ApiClient(configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
