@@ -1,6 +1,6 @@
 import os
-import paho.mqtt.client as mqtt
 from flask import Flask, render_template, request, abort
+from azure.iot.hub import IoTHubRegistryManager
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
@@ -13,33 +13,22 @@ app = Flask(__name__)
 
 configuration = Configuration(access_token=os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
 handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
+
+IOT_SERVICE_CONNECTION = os.getenv('AZURE_IOT_SERVICE_CONNECTION')
+DEVICE_ID = "KasetID"
+registry_manager = IoTHubRegistryManager(IOT_SERVICE_CONNECTION)
+
 authorized_users = {}
 user_state = {}
 PRODUCT_ID = "THASIA-KV-001"
 
-MQTT_BROKER = "d1b0d2ac95f14deab954639fbaeba387.s1.eu.hivemq.cloud"
-MQTT_PORT = 8883
-MQTT_USER = os.getenv('MQTT_USER')
-MQTT_PASS = os.getenv('MQTT_PASSWORD')
-
-client = mqtt.Client(transport="websockets")
-client.tls_set()
-client.username_pw_set(MQTT_USER, MQTT_PASS)
-
-try:
-    client.connect(MQTT_BROKER, MQTT_PORT)
-    client.loop_start()
-except Exception as e:
-    print(f"Initial MQTT connection failed: {e}")
-
 def send_drone_command(command_text):
     try:
-        result = client.publish("kaset/vision/commands", command_text)
-        if result.rc != 0:
-            print("MQTT Publish failed, attempting reconnect...")
-            client.reconnect()
+        # Sends a Cloud-to-Device (C2D) message via IoT Hub
+        registry_manager.send_c2d_message(DEVICE_ID, command_text)
+        print(f"IoT Hub Success: Sent '{command_text}' to {DEVICE_ID}")
     except Exception as e:
-        print(f"Error publishing: {e}")
+        print(f"IoT Hub Error: {e}")
 
 @app.route("/")
 def home():
@@ -83,6 +72,7 @@ def callback():
         abort(400)
     return 'OK'
 
+# --- LINE Bot Message Handling ---
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     user_id = event.source.user_id
@@ -90,7 +80,7 @@ def handle_message(event):
     reply = ""
 
     if user_text == PRODUCT_ID:
-        authorized_users[user_id] = {'authorized': True, 'area': 1}
+        authorized_users[user_id] = {'authorized': True}
         reply = "ยืนยันรหัสผลิตภัณฑ์เรียบร้อยค่ะ ยินดีต้อนรับสู่ระบบ Kaset Vision ค่ะ"
     
     elif user_id not in authorized_users or not authorized_users[user_id]['authorized']:
@@ -129,7 +119,11 @@ def handle_message(event):
             action = "SHUTDOWN" if "ปิดระบบ" in user_text else "REBOOT"
             send_drone_command(action)
             reply = f"รับทราบค่ะ กำลังดำเนินรายการ {action} ใน 5 วินาที..."
+        
+        else:
+            reply = "ขออภัยค่ะ ฉันไม่เข้าใจคำสั่งนี้ ลองเลือกจากเมนูดูนะคะ"
     
+    # Send Reply
     with ApiClient(configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
         line_bot_api.reply_message(
