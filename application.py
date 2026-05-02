@@ -68,7 +68,6 @@ def handle_message(event):
         reply = "กรุณาใส่รหัส PRODUCT ID เพื่อเริ่มต้นใช้งานระบบควบคุมโดรน"
 
     else:
-        # --- Drone Flight Commands ---
         if user_text == "สั่งบิน":
             reply = "กรุณาระบุพื้นที่ (ไร่) และความสูง (เมตร) เช่น '1 ไร่ 5 เมตร'"
         
@@ -76,7 +75,6 @@ def handle_message(event):
             send_drone_command("GET_STATUS")
             reply = "กำลังดึงข้อมูลจากโดรน..."
 
-        # --- System Management Commands (Restored) ---
         elif user_text == "จัดการระบบประมวลผล":
             reply = "ต้องการให้ Raspberry Pi 'ปิดระบบ' หรือ 'เริ่มระบบใหม่' คะ"
         
