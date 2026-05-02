@@ -54,6 +54,13 @@ def callback():
         abort(400)
     return 'OK'
 
+@app.route("/sensor-data", methods=['POST'])
+def receive_sensor_data():
+    data = request.json
+    # Logic to save status or send to LINE if needed
+    print(f"Drone Status: {data.get('status')}")
+    return "Status Received", 200
+
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     user_id = event.source.user_id
