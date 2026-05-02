@@ -1,8 +1,5 @@
 flask
 line-bot-sdk
-ultralytics
-opencv-python-headless
-pymavlink
-gunicorn
 azure-iot-hub
 requests
+gunicorn
