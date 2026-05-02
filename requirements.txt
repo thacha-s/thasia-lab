@@ -4,5 +4,5 @@ ultralytics
 opencv-python-headless
 pymavlink
 gunicorn
-paho-mqtt
+azure-iot-device
 requests
