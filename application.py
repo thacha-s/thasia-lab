@@ -15,20 +15,16 @@ app = Flask(__name__)
 configuration = Configuration(access_token=os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
 handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
 
-# --- Safe IoT Hub Initialization ---
+# --- IoT Hub Connection ---
 IOT_SERVICE_CONNECTION = os.getenv('AZURE_IOT_SERVICE_CONNECTION')
 DEVICE_ID = "KasetID"
 registry_manager = None
 
 if IOT_SERVICE_CONNECTION:
     try:
-        # Prevent crash if connection string is malformed
         registry_manager = IoTHubRegistryManager(IOT_SERVICE_CONNECTION)
-        print("IoT Hub Registry Manager initialized successfully.")
     except Exception as e:
-        print(f"Error initializing IoT Hub: {e}")
-else:
-    print("WARNING: AZURE_IOT_SERVICE_CONNECTION is not set in Environment Variables.")
+        print(f"IoT Hub Initialization Error: {e}")
 
 authorized_users = {}
 user_state = {}
@@ -36,43 +32,17 @@ PRODUCT_ID = "THASIA-KV-001"
 
 def send_drone_command(command_text):
     if registry_manager is None:
-        print("Command failed: IoT Hub not connected.")
         return False
     try:
         registry_manager.send_c2d_message(DEVICE_ID, command_text)
-        print(f"IoT Hub Success: Sent '{command_text}' to {DEVICE_ID}")
         return True
     except Exception as e:
-        print(f"IoT Hub Send Error: {e}")
+        print(f"Send Error: {e}")
         return False
 
 @app.route("/")
 def home():
     return "Kaset Vision Server is Online!"
-
-@app.route("/data", methods=['POST'])
-def receive_data():
-    data = request.json
-    disease = data.get("disease", "ไม่ระบุชนิด")
-    confidence = data.get("confidence", 0)
-    image_url = data.get("image_url")
-    
-    if confidence > 0.8:
-        for user_id, info in authorized_users.items():
-            if info.get('authorized') and image_url:
-                alert_text = f"ตรวจพบโรคในนาข้าว!\n\nชนิด: {disease}\nความเชื่อมั่น: {confidence*100:.1f}%"
-                with ApiClient(configuration) as api_client:
-                    line_bot_api = MessagingApi(api_client)
-                    line_bot_api.push_message(
-                        PushMessageRequest(
-                            to=user_id,
-                            messages=[
-                                TextMessage(text=alert_text),
-                                ImageMessage(original_content_url=image_url, preview_image_url=image_url)
-                            ]
-                        )
-                    )
-    return "OK", 200
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -93,20 +63,33 @@ def handle_message(event):
     if user_text == PRODUCT_ID:
         authorized_users[user_id] = {'authorized': True}
         reply = "ยืนยันรหัสผลิตภัณฑ์เรียบร้อยค่ะ ยินดีต้อนรับสู่ระบบ Kaset Vision ค่ะ"
+    
     elif user_id not in authorized_users or not authorized_users[user_id]['authorized']:
         reply = "กรุณาใส่รหัส PRODUCT ID เพื่อเริ่มต้นใช้งานระบบควบคุมโดรน"
+
     else:
+        # --- Drone Flight Commands ---
         if user_text == "สั่งบิน":
             reply = "กรุณาระบุพื้นที่ (ไร่) และความสูง (เมตร) เช่น '1 ไร่ 5 เมตร'"
-        elif "ไร่" in user_text and "เมตร" in user_text:
-            # Simple parser logic for brevity
-            send_drone_command("START_SCAN")
-            reply = "รับทราบค่ะ เริ่มดำเนินการบินสแกนพื้นที่"
+        
         elif user_text == "ตรวจสอบสถานะโดรน":
             send_drone_command("GET_STATUS")
             reply = "กำลังดึงข้อมูลจากโดรน..."
+
+        # --- System Management Commands (Restored) ---
+        elif user_text == "จัดการระบบประมวลผล":
+            reply = "ต้องการให้ Raspberry Pi 'ปิดระบบ' หรือ 'เริ่มระบบใหม่' คะ"
+        
+        elif "ปิดระบบ" in user_text or "เริ่มระบบใหม่" in user_text:
+            action = "SHUTDOWN" if "ปิดระบบ" in user_text else "REBOOT"
+            success = send_drone_command(action)
+            if success:
+                reply = f"รับทราบค่ะ กำลังดำเนินรายการ {action} ใน 5 วินาที..."
+            else:
+                reply = "เกิดข้อผิดพลาดในการส่งคำสั่งไปยังโดรน โปรดตรวจสอบการเชื่อมต่อ"
+
         else:
-            reply = "คำสั่งไม่ชัดเจน โปรดลองใหม่อีกครั้งค่ะ"
+            reply = "ขออภัยค่ะ ฉันไม่เข้าใจคำสั่งนี้ ลองเลือกจากเมนูดูนะคะ"
     
     with ApiClient(configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
