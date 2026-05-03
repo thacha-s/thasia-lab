@@ -1,5 +1,5 @@
 # 🛰️ Kaset Vision: Autonomous Rice Disease Detection
-> **Project by Thasia Electronics** > *Grade 8 School Innovation Project (Thailand)*
+> **Project by Thasia Electronics** > *Grade 8-9 School Innovation Project (Thailand)*
 
 An integrated IoT system using a **Raspberry Pi 5**, **YOLOv8**, and **Azure Cloud** to detect rice diseases via drone and alert farmers in real-time via the **LINE Messaging API**.
 
