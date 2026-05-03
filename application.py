@@ -11,11 +11,15 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
 app = Flask(__name__)
 
-# --- Configurations ---
+latest_sensor_data = {
+    "battery": "-",
+    "altitude": 0,
+    "progress": "-"
+}
+
 configuration = Configuration(access_token=os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
 handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
 
-# --- IoT Hub Connection ---
 IOT_SERVICE_CONNECTION = os.getenv('AZURE_IOT_SERVICE_CONNECTION')
 DEVICE_ID = "KasetID"
 registry_manager = None
@@ -40,9 +44,42 @@ def send_drone_command(command_text):
         print(f"Send Error: {e}")
         return False
 
+@app.route("/sensor-data", methods=['POST'])
+def receive_sensor_data():
+    global latest_sensor_data
+    data = request.json
+    latest_sensor_data["battery"] = data.get("battery", "-")
+    latest_sensor_data["altitude"] = data.get("altitude", 0)
+    latest_sensor_data["progress"] = data.get("progress", "-")
+    return jsonify({"status": "success"}), 200
+
+@app.route("/data", methods=['POST'])
+def receive_detection():
+    data = request.json
+    disease = data.get("disease", "ไม่ทราบชนิด")
+    confidence = data.get("confidence", 0)
+    image_url = data.get("image_url")
+    
+    if confidence > 0.8:
+        alert_text = f"ตรวจพบโรคในนาข้าว!\n\nชนิด: {disease}\nความเชื่อมั่น: {confidence*100:.1f}%"
+        for user_id in authorized_users:
+            if authorized_users[user_id].get('authorized'):
+                with ApiClient(configuration) as api_client:
+                    line_bot_api = MessagingApi(api_client)
+                    line_bot_api.push_message(
+                        PushMessageRequest(
+                            to=user_id,
+                            messages=[
+                                TextMessage(text=alert_text),
+                                ImageMessage(original_content_url=image_url, preview_image_url=image_url)
+                            ]
+                        )
+                    )
+    return "OK", 200
+
 @app.route("/")
 def home():
-    return "Kaset Vision Server is Online!"
+    return render_template('index.html')
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -53,13 +90,6 @@ def callback():
     except InvalidSignatureError:
         abort(400)
     return 'OK'
-
-@app.route("/sensor-data", methods=['POST'])
-def receive_sensor_data():
-    data = request.json
-    # Logic to save status or send to LINE if needed
-    print(f"Drone Status: {data.get('status')}")
-    return "Status Received", 200
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
@@ -76,14 +106,45 @@ def handle_message(event):
 
     else:
         if user_text == "สั่งบิน":
-            reply = "กรุณาระบุพื้นที่ (ไร่) และความสูง (เมตร) เช่น '1 ไร่ 5 เมตร'"
+            reply = "กรุณาระบุขนาดพื้นที่นาข้าว (ไร่) เช่น '1 ไร่'"
+        
+        elif "ไร่" in user_text and any(char.isdigit() for char in user_text):
+            area = [int(s) for s in user_text.split() if s.isdigit()][0]
+            user_state[user_id] = {'area': area}
+            reply = f"ระบุความสูงที่ต้องการให้โดรนบิน (เมตร) ตัวอย่าง: '5 เมตร'"
+        
+        elif "เมตร" in user_text and user_id in user_state:
+            height = [int(s) for s in user_text.split() if s.isdigit()][0]
+            area = user_state[user_id].get('area', 1)
+            send_drone_command(f"START_SCAN_RAI_{area}_ALT_{height}")
+            reply = f"รับทราบค่ะ เริ่มสแกนพื้นที่ {area} ไร่ ที่ความสูง {height} เมตร"
         
         elif user_text == "ตรวจสอบสถานะโดรน":
-            send_drone_command("GET_STATUS")
-            reply = "กำลังดึงข้อมูลจากโดรน..."
+            send_drone_command("GET_STATUS") 
+            
+            reply = (f"📊 สถานะโดรนล่าสุด:\n"
+                     f"🔋 แบตเตอรี่: {latest_sensor_data['battery']}%\n"
+                     f"📏 ความสูง: {latest_sensor_data['altitude']} เมตร\n"
+                     f"📈 ความคืบหน้า: {latest_sensor_data['progress']}%")
 
         elif user_text == "จัดการระบบประมวลผล":
             reply = "ต้องการให้ Raspberry Pi 'ปิดระบบ' หรือ 'เริ่มระบบใหม่' คะ"
+
+        elif user_text == "หยุดระบบฉุกเฉิน":
+            user_state[user_id] = {'pending_action': 'EMERGENCY_STOP'}
+            reply = "⚠️ ยืนยันการหยุดระบบฉุกเฉินหรือไม่?\n\nพิมพ์ 'Y' เพื่อยืนยัน หรือ 'N' เพื่อยกเลิก"
+    
+        elif user_id in user_state and user_state[user_id].get('pending_action') == 'EMERGENCY_STOP':
+            if user_text.upper() == 'Y':
+                success = send_drone_command("EMERGENCY_STOP")
+                if success:
+                    reply = "รับทราบค่ะ โดรนกำลังหยุดทำงานทันที"
+                else:
+                    reply = "ไม่สามารถส่งคำสั่งได้ โปรดใช้รีโมทสำรอง"
+            else:
+                reply = "ยกเลิกคำสั่งหยุดฉุกเฉิน ระบบยังคงทำงานปกติ"
+        
+            del user_state[user_id]
         
         elif "ปิดระบบ" in user_text or "เริ่มระบบใหม่" in user_text:
             action = "SHUTDOWN" if "ปิดระบบ" in user_text else "REBOOT"
@@ -93,8 +154,6 @@ def handle_message(event):
             else:
                 reply = "เกิดข้อผิดพลาดในการส่งคำสั่งไปยังโดรน โปรดตรวจสอบการเชื่อมต่อ"
 
-        else:
-            reply = "ขออภัยค่ะ ฉันไม่เข้าใจคำสั่งนี้ ลองเลือกจากเมนูดูนะคะ"
     
     with ApiClient(configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
