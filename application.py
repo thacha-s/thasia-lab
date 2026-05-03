@@ -12,9 +12,9 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent
 app = Flask(__name__)
 
 latest_sensor_data = {
-    "battery": "-",
+    "battery": "UNKNOWN",
     "altitude": 0,
-    "progress": "-"
+    "progress": "UNKNOWN"
 }
 
 configuration = Configuration(access_token=os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
@@ -48,9 +48,9 @@ def send_drone_command(command_text):
 def receive_sensor_data():
     global latest_sensor_data
     data = request.json
-    latest_sensor_data["battery"] = data.get("battery", "-")
+    latest_sensor_data["battery"] = data.get("battery", "UNKNOWN")
     latest_sensor_data["altitude"] = data.get("altitude", 0)
-    latest_sensor_data["progress"] = data.get("progress", "-")
+    latest_sensor_data["progress"] = data.get("progress", "UNKNOWN")
     return jsonify({"status": "success"}), 200
 
 @app.route("/data", methods=['POST'])
