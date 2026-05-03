@@ -1,11 +1,12 @@
 import os
-from flask import Flask, render_template, request, abort
+from flask import Flask, render_template, request, abort, jsonify
 from azure.iot.hub import IoTHubRegistryManager
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
     Configuration, ApiClient, MessagingApi, ReplyMessageRequest, 
-    PushMessageRequest, TextMessage, ImageMessage
+    PushMessageRequest, TextMessage, ImageMessage, QuickReply,
+    QuickReplyItem, MessageAction
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
@@ -128,24 +129,25 @@ def handle_message(event):
                      f"📈 ความคืบหน้า: {latest_sensor_data['progress']}%")
 
         elif user_text == "จัดการระบบประมวลผล":
-            reply = "ต้องการให้ Raspberry Pi 'ปิดระบบ' หรือ 'เริ่มระบบใหม่' คะ"
 
-        elif user_text == "หยุดระบบฉุกเฉิน":
-            user_state[user_id] = {'pending_action': 'EMERGENCY_STOP'}
-            reply = "⚠️ ยืนยันการหยุดระบบฉุกเฉินหรือไม่?\n\nพิมพ์ 'Y' เพื่อยืนยัน หรือ 'N' เพื่อยกเลิก"
-    
-        elif user_id in user_state and user_state[user_id].get('pending_action') == 'EMERGENCY_STOP':
-            if user_text.upper() == 'Y':
-                success = send_drone_command("EMERGENCY_STOP")
-                if success:
-                    reply = "รับทราบค่ะ โดรนกำลังหยุดทำงานทันที"
-                else:
-                    reply = "ไม่สามารถส่งคำสั่งได้ โปรดใช้รีโมทสำรอง"
-            else:
-                reply = "ยกเลิกคำสั่งหยุดฉุกเฉิน ระบบยังคงทำงานปกติ"
-        
-            del user_state[user_id]
-        
+            quick_reply = QuickReply(items=[
+                QuickReplyItem(action=MessageAction(label="ปิดระบบ", text="ปิดระบบ")),
+                QuickReplyItem(action=MessageAction(label="เริ่มระบบใหม่", text="เริ่มระบบใหม่"))
+            ])
+            
+            with ApiClient(configuration) as api_client:
+                line_bot_api = MessagingApi(api_client)
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(
+                            text = "ต้องการให้ Raspberry Pi 'ปิดระบบ' หรือ 'เริ่มระบบใหม่' คะ",
+                            quick_reply=quick_reply
+                        )]
+                    )
+                )
+            return
+
         elif "ปิดระบบ" in user_text or "เริ่มระบบใหม่" in user_text:
             action = "SHUTDOWN" if "ปิดระบบ" in user_text else "REBOOT"
             success = send_drone_command(action)
@@ -153,7 +155,37 @@ def handle_message(event):
                 reply = f"รับทราบค่ะ กำลังดำเนินรายการ {action} ใน 5 วินาที..."
             else:
                 reply = "เกิดข้อผิดพลาดในการส่งคำสั่งไปยังโดรน โปรดตรวจสอบการเชื่อมต่อ"
-
+                
+        elif user_text == "หยุดระบบฉุกเฉิน":
+            user_state[user_id] = {'pending_action': 'EMERGENCY_STOP'}
+            
+            quick_reply = QuickReply(items=[
+                QuickReplyItem(action=MessageAction(label="ยืนยัน (Y)", text="Y")),
+                QuickReplyItem(action=MessageAction(label="ยกเลิก (N)", text="N"))
+            ])
+            
+            with ApiClient(configuration) as api_client:
+                line_bot_api = MessagingApi(api_client)
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(
+                            text="⚠️ ยืนยันการหยุดระบบฉุกเฉินหรือไม่?\n(โดรนจะหยุดการทำงานของมอเตอร์ทันที)",
+                            quick_reply=quick_reply
+                        )]
+                    )
+                )
+            return
+    
+        elif user_id in user_state and user_state[user_id].get('pending_action') == 'EMERGENCY_STOP':
+            if user_text.upper() == 'Y':
+                success = send_drone_command("EMERGENCY_STOP")
+                reply = "EMERGENCY STOP SENT! ระบบหยุดทำงานแล้ว" if success else "ผิดพลาด: ไม่สามารถส่งคำสั่งได้"
+            else:
+                reply = "ยกเลิกคำสั่งหยุดฉุกเฉิน ระบบยังคงทำงานปกติ"
+            
+            # Clear state
+            del user_state[user_id]
     
     with ApiClient(configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
