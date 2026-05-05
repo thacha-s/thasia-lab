@@ -60,9 +60,19 @@ def receive_detection():
     disease = data.get("disease", "ไม่ทราบชนิด")
     confidence = data.get("confidence", 0)
     image_url = data.get("image_url")
+    map_link = data.get("location_link", "Error")
     
     if confidence > 0.8:
-        alert_text = f"ตรวจพบโรคในนาข้าว!\n\nชนิด: {disease}\nความเชื่อมั่น: {confidence*100:.1f}%"
+        alert_text = (
+            f"📢 ตรวจพบโรคข้าวใหม่!\n"
+            f"---------------\n"
+            f"🔍 ชนิด: {disease}\n"
+            f"🎯 ความแม่นยำ: {confidence*100:.1f}%\n"
+            f"📍 พิกัดในนา: {map_link}\n\n"
+            f"กดที่ลิงก์ด้านบนเพื่อดูตำแหน่งในแผนที่ได้เลยค่ะ"
+        )
+        
+        # Send Push Message to authorized users
         for user_id in authorized_users:
             if authorized_users[user_id].get('authorized'):
                 with ApiClient(configuration) as api_client:
